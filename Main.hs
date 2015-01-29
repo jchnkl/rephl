@@ -1,124 +1,23 @@
-module Main where
-
-import Control.Applicative
 import Control.Arrow ((&&&))
--- import Control.Exception
 import Control.Monad
-import Control.Monad.Catch (MonadMask(..))
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
--- import Control.Monad.Catch
--- import Control.Monad.IO.Class
--- import Data.Typeable
--- import Language.Haskell.Interpreter
 import System.Console.Haskeline
--- import System.Environment
 
-import Exception hiding (catch)
-import GhcMonad
-import HscTypes
-import Module
-import InteractiveEval hiding (obtainTermFromId)
-
+-- GHC
 import Debugger (showTerm)
--- import GHC (gcatch, getModSummary, lookupName, runGhc)
--- import GHC -- (gcatch, getModSummary, lookupName, runGhc)
-import GHC -- (gcatch, getModSummary, lookupName, runGhc)
-import GHC.Paths (libdir)
 import DynFlags
+import Exception hiding (catch)
+import GHC
+import GHC.Paths (libdir)
+import GhcMonad
 import Outputable
-
-{-
-showError :: InterpreterError -> String
-showError error = case error of
-    WontCompile es -> "GhcError:\n" ++ unwords (map (("\t"++) . errMsg) es)
-    other          -> show other
-
-showResult :: Show a => Either InterpreterError a -> String
-showResult r = case r of
-    Left error -> showError error
-    Right a    -> show a
-
-evalExpr :: (Functor m, MonadMask m, MonadIO m) => String -> m String
-evalExpr expr = fmap showResult . runInterpreter $ do
-    setImports ["Prelude"]
-    typeChecks stupidTest >>= liftIO . putStrLn . show
-    typeOf stupidTest >>= liftIO . putStrLn
-    eval expr
-    -- interpret expr (as :: String)
-    where stupidTest = "let x = 2"
-
-main :: IO ()
-main = concat <$> getArgs >>= evalExpr >>= putStrLn
--}
-
--- main :: IO ()
--- main = runInputT defaultSettings loop
---     where
---     loop :: InputT IO ()
---     loop = do
---         minput <- getInputLine "% "
---         case minput of
---             Nothing -> return ()
---             Just "quit" -> return ()
---             Just expr   -> do -- void $ runInterpreter $ do
---                 -- loadModules ["Prelude"]
---                 liftIO $ evalExpr expr >>= putStrLn . show
---                 loop
-
-
-{-
-main :: IO ()
-main = do
-    res <- example
-    str <- runGhc (Just libdir) $ do
-        dflags <- getSessionDynFlags
-        return $ showSDoc dflags $ ppr res
-    putStrLn str
-
-    where
-    example = defaultErrorHandler defaultFatalMessager defaultFlushOut $ do
-        runGhc (Just libdir) $ do
-            dflags <- getSessionDynFlags
-            let dflags' = foldl xopt_set dflags [Opt_Cpp, Opt_ImplicitPrelude, Opt_MagicHash]
-            setSessionDynFlags dflags'
-            setContext [IIDecl $ simpleImportDecl (mkModuleName "Prelude")]
-            run "let x = 2"
-            run "x * x"
--}
-
-
-run :: GhcMonad m => String -> m ()
-run expr=do
-    rr <- runStmt expr RunToCompletion
-    case rr of
-            RunOk ns->do
-                    let q=(qualName &&& qualModule) defaultUserStyle
-                    mapM_ (\n->do
-                            mty<-lookupName n
-                            case mty of
-                                    Just (AnId aid)->do
-                                            df <- getSessionDynFlags
-                                            evalDoc <- gcatch (obtainTermFromId maxBound True aid >>= showTerm) catchError
-                                            liftIO $ putStrLn $ showSDocForUser df q evalDoc
-                                            return ()
-                                    _ ->return ()
-                            ) ns
-            RunException e ->liftIO $ print e
-            _->return ()
-
-    where
-    catchError exn = return (text "*** Exception:" <+> text (show (exn :: SomeException)))
-
--- instance MonadTrans GhcT where
---     lift = liftGhcT
-
 
 initGhc :: GhcMonad m => m ()
 initGhc = do
     -- necessary, otherwise GHC complains about missing package state:
     -- no package state yet: call GHC.setSessionDynFlags
-    getSessionDynFlags >>= setSessionDynFlags
+    _ <- getSessionDynFlags >>= setSessionDynFlags
     -- dflags <- getSessionDynFlags
     -- the Opt_ImplicitPrelude, they do nothing!
     -- flip xopt_set Opt_ImplicitPrelude <$> getSessionDynFlags >>= setSessionDynFlags
@@ -144,12 +43,11 @@ runExpr expr = runStmt expr RunToCompletion >>= \rr -> case rr of
     catchError e = return $ text "*** Exception:" <+> text (show (e :: SomeException))
 
 -- copied and modified from the ReaderT instance
--- 1) orphan
+-- 1) Orphan instance
 -- 2) calling runGhcT with (Just libdir) smells fishy;
 --    can I somehow get libdir from a Session?
-instance (Functor m, ExceptionMonad m, MonadException m)
-    => MonadException (GhcT m) where
-    controlIO f = GhcT $ \r -> controlIO $ \(RunIO run) ->
+instance (Functor m, ExceptionMonad m, MonadException m) => MonadException (GhcT m) where
+    controlIO f = GhcT $ \_ -> controlIO $ \(RunIO run) ->
         let run' = RunIO (fmap (GhcT . const) . run . runGhcT (Just libdir))
         in fmap (runGhcT (Just libdir)) $ f run'
 
