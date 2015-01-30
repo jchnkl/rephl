@@ -2,7 +2,8 @@ import Control.Arrow ((&&&))
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
-import System.Console.Haskeline
+import System.Console.Haskeline (InputT, MonadException, RunIO(..))
+import qualified System.Console.Haskeline as HL
 
 -- GHC
 import Debugger (showTerm)
@@ -44,7 +45,7 @@ runExpr expr = runStmt expr RunToCompletion >>= \rr -> case rr of
 
 -- taken from GHCi sources; didn't see the unGhcT record function at first
 instance MonadException m => MonadException (GhcT m) where
-  controlIO f = GhcT $ \s -> controlIO $ \(RunIO run) -> let
+  controlIO f = GhcT $ \s -> HL.controlIO $ \(RunIO run) -> let
                     run' = RunIO (fmap (GhcT . const) . run . flip unGhcT s)
                     in fmap (flip unGhcT s) $ f run'
 
@@ -56,12 +57,12 @@ hoistMaybeT :: Monad m => Maybe a -> MaybeT m a
 hoistMaybeT = MaybeT . return
 
 main :: IO ()
-main = runDefaultGhcT . runInputT defaultSettings . void . runMaybeT $ do
+main = runDefaultGhcT . HL.runInputT HL.defaultSettings . void . runMaybeT $ do
     lift (lift $ initGhc) >> loop
     where
     loop :: MaybeT (InputT (GhcT IO)) ()
     loop = do
-        input <- lift (getInputLine "% ") >>= hoistMaybeT
+        input <- lift (HL.getInputLine "% ") >>= hoistMaybeT
         liftIO $ putStrLn input
         if input == "quit"
             then return ()
