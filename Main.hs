@@ -42,14 +42,11 @@ runExpr expr = runStmt expr RunToCompletion >>= \rr -> case rr of
 
     catchError e = return $ text "*** Exception:" <+> text (show (e :: SomeException))
 
--- copied and modified from the ReaderT instance
--- 1) Orphan instance
--- 2) calling runGhcT with (Just libdir) smells fishy;
---    can I somehow get libdir from a Session?
-instance (Functor m, ExceptionMonad m, MonadException m) => MonadException (GhcT m) where
-    controlIO f = GhcT $ \_ -> controlIO $ \(RunIO run) ->
-        let run' = RunIO (fmap (GhcT . const) . run . runGhcT (Just libdir))
-        in fmap (runGhcT (Just libdir)) $ f run'
+-- taken from GHCi sources; didn't see the unGhcT record function at first
+instance MonadException m => MonadException (GhcT m) where
+  controlIO f = GhcT $ \s -> controlIO $ \(RunIO run) -> let
+                    run' = RunIO (fmap (GhcT . const) . run . flip unGhcT s)
+                    in fmap (flip unGhcT s) $ f run'
 
 runDefaultGhcT :: (ExceptionMonad m, Functor m) => GhcT m a -> m a
 runDefaultGhcT = defaultErrorHandler defaultFatalMessager defaultFlushOut
